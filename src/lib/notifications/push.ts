@@ -1,15 +1,3 @@
-import webpush from "web-push";
-
-// VAPID keys for Web Push
-// Generate with: npx web-push generate-vapid-keys
-const VAPID_PUBLIC_KEY = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY ?? "";
-const VAPID_PRIVATE_KEY = process.env.VAPID_PRIVATE_KEY ?? "";
-const VAPID_SUBJECT = process.env.VAPID_SUBJECT ?? "mailto:admin@pulse.app";
-
-if (VAPID_PUBLIC_KEY && VAPID_PRIVATE_KEY) {
-  webpush.setVapidDetails(VAPID_SUBJECT, VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY);
-}
-
 export interface PushSubscriptionData {
   readonly endpoint: string;
   readonly keys: {
@@ -28,18 +16,27 @@ export interface NotificationPayload {
 
 /**
  * Send a push notification to a subscription.
+ * Uses dynamic import to avoid crashing when web-push native bindings fail.
  */
 export async function sendPushNotification(
   subscription: PushSubscriptionData,
   payload: NotificationPayload
 ): Promise<boolean> {
-  if (!VAPID_PUBLIC_KEY || !VAPID_PRIVATE_KEY) {
-    console.warn("Push notifications not configured — missing VAPID keys");
+  const publicKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY;
+  const privateKey = process.env.VAPID_PRIVATE_KEY;
+  const subject = process.env.VAPID_SUBJECT ?? "mailto:admin@pulse.app";
+
+  if (!publicKey || !privateKey) {
+    // Push not configured — skip silently
     return false;
   }
 
   try {
-    await webpush.sendNotification(
+    // Dynamic import to avoid top-level crash if web-push fails to load
+    const webpush = await import("web-push");
+    webpush.default.setVapidDetails(subject, publicKey, privateKey);
+
+    await webpush.default.sendNotification(
       {
         endpoint: subscription.endpoint,
         keys: {
@@ -53,7 +50,6 @@ export async function sendPushNotification(
     return true;
   } catch (error) {
     const statusCode = (error as { statusCode?: number }).statusCode;
-    // 410 Gone or 404 means subscription is invalid
     if (statusCode === 410 || statusCode === 404) {
       console.warn("Push subscription expired:", subscription.endpoint);
     } else {

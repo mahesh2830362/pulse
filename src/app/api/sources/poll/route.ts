@@ -1,4 +1,4 @@
-import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { fetchFeed } from "@/lib/monitor/rss";
 import { checkPageChange } from "@/lib/monitor/page";
 import { sendPushNotification } from "@/lib/notifications/push";
@@ -11,6 +11,7 @@ export const maxDuration = 60;
 /**
  * GET /api/sources/poll — Vercel Cron handler (every 5 minutes).
  * Also supports POST for manual triggering.
+ * Uses admin client since cron jobs have no user session/cookies.
  */
 export async function GET(request: Request) {
   return pollSources(request);
@@ -31,7 +32,7 @@ async function pollSources(request: Request) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const supabase = await createClient();
+    const supabase = createAdminClient();
 
     // Find all active sources due for checking
     const { data: sources, error: sourcesError } = await supabase
