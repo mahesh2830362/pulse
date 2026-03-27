@@ -150,9 +150,9 @@ async function addAsSource(
 
   const defaultInterval =
     sourceType === "rss" || sourceType === "youtube"
-      ? 30
+      ? 10
       : sourceType === "website"
-        ? 360
+        ? 10
         : 0;
 
   const { data: source, error: insertError } = await supabase

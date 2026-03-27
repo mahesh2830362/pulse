@@ -101,3 +101,114 @@ a:hover {
 ::-webkit-scrollbar-thumb:hover {
   background: var(--color-text-secondary);
 }
+
+/* --- Responsive Layout --- */
+
+/* Desktop: sidebar + main */
+.desktop-layout {
+  display: flex;
+  min-height: 100vh;
+  background-color: var(--color-bg);
+}
+
+.desktop-main {
+  flex: 1;
+  padding: 40px 48px;
+  max-width: 960px;
+  position: relative;
+}
+
+.notification-bell-wrapper {
+  position: absolute;
+  top: 40px;
+  right: 48px;
+}
+
+.mobile-layout {
+  display: none;
+}
+
+/* Mobile: hide sidebar, show bottom nav */
+@media (max-width: 768px) {
+  .desktop-layout {
+    display: none;
+  }
+
+  .mobile-layout {
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+    min-height: 100dvh;
+    background-color: var(--color-bg);
+  }
+
+  .mobile-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--color-border);
+    background-color: var(--color-surface);
+    position: sticky;
+    top: 0;
+    z-index: 10;
+  }
+
+  .mobile-logo {
+    font-size: 22px;
+    font-weight: 700;
+    letter-spacing: -0.04em;
+    color: var(--color-text);
+  }
+
+  .mobile-main {
+    flex: 1;
+    padding: 20px 16px;
+    padding-bottom: 80px; /* space for bottom nav */
+    overflow-y: auto;
+  }
+
+  .mobile-bottom-nav {
+    display: flex;
+    justify-content: space-around;
+    align-items: center;
+    padding: 8px 0;
+    padding-bottom: max(8px, env(safe-area-inset-bottom));
+    border-top: 1px solid var(--color-border);
+    background-color: var(--color-surface);
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    z-index: 10;
+  }
+
+  .mobile-nav-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    padding: 4px 12px;
+    text-decoration: none;
+    color: var(--color-text-tertiary);
+    transition: color 0.15s;
+  }
+
+  .mobile-nav-item:hover {
+    text-decoration: none;
+  }
+
+  .mobile-nav-item.active {
+    color: var(--color-text);
+  }
+
+  .mobile-nav-icon {
+    font-size: 20px;
+  }
+
+  .mobile-nav-label {
+    font-size: 10px;
+    font-weight: 500;
+    letter-spacing: -0.01em;
+  }
+}

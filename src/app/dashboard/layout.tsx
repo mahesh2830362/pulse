@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { Sidebar } from "@/components/sidebar";
 import { NotificationBell } from "@/components/notification-bell";
 import { ServiceWorkerRegistrar } from "@/components/sw-registrar";
+import { MobileNav } from "@/components/mobile-nav";
 
 export default async function DashboardLayout({
   children,
@@ -19,35 +20,31 @@ export default async function DashboardLayout({
   }
 
   return (
-    <div
-      style={{
-        display: "flex",
-        minHeight: "100vh",
-        backgroundColor: "var(--color-bg)",
-      }}
-    >
+    <>
       <ServiceWorkerRegistrar />
-      <Sidebar user={user} />
-      <main
-        style={{
-          flex: 1,
-          padding: "40px 48px",
-          maxWidth: 960,
-          position: "relative",
-        }}
-      >
-        {/* Notification bell — top right */}
-        <div
-          style={{
-            position: "absolute",
-            top: 40,
-            right: 48,
-          }}
-        >
+
+      {/* Desktop layout */}
+      <div className="desktop-layout">
+        <Sidebar user={user} />
+        <main className="desktop-main">
+          <div className="notification-bell-wrapper">
+            <NotificationBell />
+          </div>
+          {children}
+        </main>
+      </div>
+
+      {/* Mobile layout */}
+      <div className="mobile-layout">
+        <header className="mobile-header">
+          <span className="mobile-logo">Pulse</span>
           <NotificationBell />
-        </div>
-        {children}
-      </main>
-    </div>
+        </header>
+        <main className="mobile-main">
+          {children}
+        </main>
+        <MobileNav />
+      </div>
+    </>
   );
 }

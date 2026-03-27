@@ -90,10 +90,10 @@ export async function POST(request: Request) {
     // Determine default check interval
     const defaultInterval =
       sourceType === "rss" || sourceType === "youtube"
-        ? 30 // RSS: every 30 min
+        ? 10 // RSS: every 10 min
         : sourceType === "website"
-          ? 360 // Page monitoring: every 6 hours
-          : 0; // X profiles: no auto-check
+          ? 10 // Page monitoring: every 10 min
+          : 0; // X profiles: no auto-check (paste links manually)
 
     // Insert source
     const { data: source, error: insertError } = await supabase

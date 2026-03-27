@@ -6,17 +6,24 @@ import type { PushSubscriptionData } from "@/lib/notifications/push";
 import { NextResponse } from "next/server";
 
 /**
- * POST /api/sources/poll — Poll all sources due for checking.
- * Called by a cron job or manually triggered.
- * Checks RSS feeds and monitored pages for new content.
+ * GET /api/sources/poll — Vercel Cron handler (every 5 minutes).
+ * Also supports POST for manual triggering.
  */
+export async function GET(request: Request) {
+  return pollSources(request);
+}
+
 export async function POST(request: Request) {
+  return pollSources(request);
+}
+
+async function pollSources(request: Request) {
   try {
-    // Verify cron secret to prevent unauthorized polling
+    // Verify authorization: Vercel Cron sends CRON_SECRET header automatically
     const authHeader = request.headers.get("authorization");
     const cronSecret = process.env.CRON_SECRET;
 
-    // Allow if cron secret matches, or if no secret is set (dev mode)
+    // Allow if: Vercel cron (no secret needed on Vercel), secret matches, or no secret set (dev)
     if (cronSecret && authHeader !== `Bearer ${cronSecret}`) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
