@@ -1,4 +1,3 @@
-import { JSDOM } from "jsdom";
 import SHA256 from "crypto-js/sha256";
 
 export interface PageChangeResult {
@@ -11,7 +10,7 @@ export interface PageChangeResult {
 
 /**
  * Check if a webpage has changed since the last check.
- * Compares a hash of the page's main content to detect meaningful changes.
+ * Uses regex-based parsing (no jsdom) for Vercel compatibility.
  */
 export async function checkPageChange(
   url: string,
@@ -30,55 +29,43 @@ export async function checkPageChange(
   }
 
   const html = await response.text();
-  const dom = new JSDOM(html, { url });
-  const doc = dom.window.document;
 
-  // Extract the main content area — strip nav, header, footer, scripts, etc.
-  const selectorsToRemove = [
-    "nav",
-    "header",
-    "footer",
-    "script",
-    "style",
-    "noscript",
-    "iframe",
-    ".sidebar",
-    ".nav",
-    ".header",
-    ".footer",
-    ".menu",
-    ".advertisement",
-    ".ad",
-    "#sidebar",
-    "#nav",
-    "#header",
-    "#footer",
-  ];
+  // Strip scripts, styles, nav, header, footer
+  const cleaned = html
+    .replace(/<script[\s\S]*?<\/script>/gi, "")
+    .replace(/<style[\s\S]*?<\/style>/gi, "")
+    .replace(/<nav[\s\S]*?<\/nav>/gi, "")
+    .replace(/<header[\s\S]*?<\/header>/gi, "")
+    .replace(/<footer[\s\S]*?<\/footer>/gi, "")
+    .replace(/<noscript[\s\S]*?<\/noscript>/gi, "")
+    .replace(/<iframe[\s\S]*?<\/iframe>/gi, "");
 
-  for (const selector of selectorsToRemove) {
-    doc.querySelectorAll(selector).forEach((el) => el.remove());
-  }
+  // Try to find main content area
+  const mainMatch =
+    cleaned.match(/<main[\s\S]*?<\/main>/i) ??
+    cleaned.match(/<article[\s\S]*?<\/article>/i) ??
+    cleaned.match(/<div[^>]*role="main"[\s\S]*?<\/div>/i);
 
-  // Get main content text
-  const mainContent =
-    doc.querySelector("main") ??
-    doc.querySelector("article") ??
-    doc.querySelector('[role="main"]') ??
-    doc.querySelector("#content") ??
-    doc.querySelector(".content") ??
-    doc.body;
+  const contentHtml = mainMatch?.[0] ?? cleaned;
 
-  const textContent = mainContent?.textContent
-    ?.replace(/\s+/g, " ")
+  // Strip all HTML tags to get text
+  const textContent = contentHtml
+    .replace(/<[^>]*>/g, " ")
+    .replace(/&[a-z]+;/gi, " ")
+    .replace(/\s+/g, " ")
     .trim()
-    .slice(0, 10000) ?? "";
+    .slice(0, 10000);
 
   const newHash = SHA256(textContent).toString();
 
-  // Get metadata
-  const title = doc.title ?? null;
-  const ogImage =
-    doc.querySelector('meta[property="og:image"]')?.getAttribute("content") ?? null;
+  // Extract title
+  const titleMatch = html.match(/<title[^>]*>([^<]+)<\/title>/i);
+  const title = titleMatch?.[1]?.trim() ?? null;
+
+  // Extract og:image
+  const ogImageMatch = html.match(/property="og:image"[^>]*content="([^"]+)"/i)
+    ?? html.match(/content="([^"]+)"[^>]*property="og:image"/i);
+  const imageUrl = ogImageMatch?.[1] ?? null;
 
   const snippet = textContent.slice(0, 300) || null;
 
@@ -87,6 +74,6 @@ export async function checkPageChange(
     newHash,
     title,
     contentSnippet: snippet,
-    imageUrl: ogImage,
+    imageUrl,
   };
 }

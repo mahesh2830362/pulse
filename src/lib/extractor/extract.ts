@@ -1,5 +1,3 @@
-import { JSDOM } from "jsdom";
-import { Readability } from "@mozilla/readability";
 import SHA256 from "crypto-js/sha256";
 import { detectUrlType } from "./detect";
 
@@ -17,7 +15,7 @@ export interface ExtractedContent {
 
 /**
  * Extract content from any URL.
- * Detects the URL type and applies the appropriate extraction strategy.
+ * Uses regex-based parsing (no jsdom) for Vercel serverless compatibility.
  */
 export async function extractContent(rawUrl: string): Promise<ExtractedContent> {
   const detection = detectUrlType(rawUrl);
@@ -32,14 +30,10 @@ export async function extractContent(rawUrl: string): Promise<ExtractedContent> 
   }
 }
 
-/**
- * Extract tweet content using X's free oEmbed endpoint.
- */
 async function extractTweet(
   url: string,
   metadata: Record<string, string>
 ): Promise<ExtractedContent> {
-  // For profile URLs (not individual posts), return profile info
   if (metadata.isProfile === "true") {
     return {
       url,
@@ -54,7 +48,6 @@ async function extractTweet(
     };
   }
 
-  // For individual tweets, use oEmbed
   try {
     const oembedUrl = `https://publish.twitter.com/oembed?url=${encodeURIComponent(url)}&omit_script=true`;
     const response = await fetch(oembedUrl);
@@ -64,8 +57,6 @@ async function extractTweet(
     }
 
     const data = await response.json();
-
-    // Extract plain text from HTML embed
     const htmlContent = data.html as string;
     const plainText = htmlContent
       .replace(/<[^>]*>/g, " ")
@@ -87,8 +78,7 @@ async function extractTweet(
         authorUrl: data.author_url,
       },
     };
-  } catch (error) {
-    // Fallback: return basic info
+  } catch {
     return {
       url,
       title: `Tweet by @${metadata.username}`,
@@ -103,14 +93,10 @@ async function extractTweet(
   }
 }
 
-/**
- * Extract YouTube video info using oEmbed (free, no API key needed).
- */
 async function extractYouTube(
   url: string,
   metadata: Record<string, string>
 ): Promise<ExtractedContent> {
-  // For channel URLs, return channel info
   if (metadata.isChannel === "true") {
     const channelName = metadata.channelPath.split("/").pop() ?? "Unknown";
     return {
@@ -126,7 +112,6 @@ async function extractYouTube(
     };
   }
 
-  // For videos, use oEmbed
   try {
     const oembedUrl = `https://www.youtube.com/oembed?url=${encodeURIComponent(url)}&format=json`;
     const response = await fetch(oembedUrl);
@@ -149,8 +134,6 @@ async function extractYouTube(
       rawMetadata: {
         ...metadata,
         thumbnailUrl: data.thumbnail_url,
-        thumbnailWidth: data.thumbnail_width,
-        thumbnailHeight: data.thumbnail_height,
         authorUrl: data.author_url,
         embedHtml: data.html,
       },
@@ -174,8 +157,8 @@ async function extractYouTube(
 }
 
 /**
- * Extract article content using Mozilla Readability.
- * Falls back to Open Graph / meta tag extraction.
+ * Extract article content using regex and Open Graph tags.
+ * Lightweight alternative to jsdom/Readability for serverless.
  */
 async function extractArticle(url: string): Promise<ExtractedContent> {
   try {
@@ -193,35 +176,54 @@ async function extractArticle(url: string): Promise<ExtractedContent> {
     }
 
     const html = await response.text();
-    const dom = new JSDOM(html, { url });
-    const doc = dom.window.document;
 
-    // Try Readability first
-    const reader = new Readability(doc.cloneNode(true) as Document);
-    const article = reader.parse();
+    // Extract meta tags using regex
+    const ogTitle = getMetaContent(html, 'property="og:title"') ??
+      getMetaContent(html, 'name="twitter:title"');
+    const ogDescription = getMetaContent(html, 'property="og:description"') ??
+      getMetaContent(html, 'name="twitter:description"') ??
+      getMetaContent(html, 'name="description"');
+    const ogImage = getMetaContent(html, 'property="og:image"') ??
+      getMetaContent(html, 'name="twitter:image"');
+    const ogAuthor = getMetaContent(html, 'name="author"') ??
+      getMetaContent(html, 'property="article:author"');
+    const ogPublished = getMetaContent(html, 'property="article:published_time"') ??
+      getMetaContent(html, 'name="date"');
+    const siteName = getMetaContent(html, 'property="og:site_name"') ??
+      new URL(url).hostname;
 
-    // Extract Open Graph / meta data as fallback
-    const ogTitle = getMetaContent(doc, 'property="og:title"') ??
-      getMetaContent(doc, 'name="twitter:title"');
-    const ogDescription = getMetaContent(doc, 'property="og:description"') ??
-      getMetaContent(doc, 'name="twitter:description"') ??
-      getMetaContent(doc, 'name="description"');
-    const ogImage = getMetaContent(doc, 'property="og:image"') ??
-      getMetaContent(doc, 'name="twitter:image"');
-    const ogAuthor = getMetaContent(doc, 'name="author"') ??
-      getMetaContent(doc, 'property="article:author"');
-    const ogPublished = getMetaContent(doc, 'property="article:published_time"') ??
-      getMetaContent(doc, 'name="date"');
+    // Extract <title> tag
+    const titleMatch = html.match(/<title[^>]*>([^<]+)<\/title>/i);
+    const pageTitle = titleMatch?.[1]?.trim();
 
-    const title = article?.title ?? ogTitle ?? doc.title ?? url;
-    const snippet =
-      article?.textContent?.slice(0, 500) ?? ogDescription ?? null;
+    // Extract body text for snippet
+    const bodyContent = html
+      .replace(/<script[\s\S]*?<\/script>/gi, "")
+      .replace(/<style[\s\S]*?<\/style>/gi, "")
+      .replace(/<nav[\s\S]*?<\/nav>/gi, "")
+      .replace(/<header[\s\S]*?<\/header>/gi, "")
+      .replace(/<footer[\s\S]*?<\/footer>/gi, "");
+
+    // Try to get article/main content
+    const articleMatch =
+      bodyContent.match(/<article[\s\S]*?<\/article>/i) ??
+      bodyContent.match(/<main[\s\S]*?<\/main>/i);
+
+    const contentArea = articleMatch?.[0] ?? bodyContent;
+    const plainText = contentArea
+      .replace(/<[^>]*>/g, " ")
+      .replace(/&[a-z]+;/gi, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+
+    const title = ogTitle ?? pageTitle ?? url;
+    const snippet = ogDescription ?? plainText.slice(0, 500) ?? null;
 
     return {
       url,
       title,
       contentSnippet: snippet,
-      author: article?.byline ?? ogAuthor ?? null,
+      author: ogAuthor ?? null,
       publishedAt: ogPublished ?? null,
       imageUrl: ogImage ?? null,
       contentHash: SHA256(url + title + (snippet ?? "")).toString(),
@@ -230,18 +232,12 @@ async function extractArticle(url: string): Promise<ExtractedContent> {
         ogTitle,
         ogDescription,
         ogImage,
-        siteName:
-          getMetaContent(doc, 'property="og:site_name"') ??
-          new URL(url).hostname,
-        readabilityExcerpt: article?.excerpt ?? null,
-        wordCount: article?.textContent
-          ? article.textContent.split(/\s+/).length
-          : null,
-        fullContent: article?.textContent ?? null,
+        siteName,
+        fullContent: plainText.slice(0, 5000),
+        wordCount: plainText.split(/\s+/).length,
       },
     };
   } catch (error) {
-    // Minimal fallback
     return {
       url,
       title: new URL(url).hostname,
@@ -258,7 +254,24 @@ async function extractArticle(url: string): Promise<ExtractedContent> {
   }
 }
 
-function getMetaContent(doc: Document, selector: string): string | null {
-  const el = doc.querySelector(`meta[${selector}]`);
-  return el?.getAttribute("content") ?? null;
+/**
+ * Extract meta tag content using regex.
+ * Handles both attribute orders: property/name before or after content.
+ */
+function getMetaContent(html: string, attrSelector: string): string | null {
+  // Try: <meta property="..." content="...">
+  const regex1 = new RegExp(
+    `<meta[^>]*${attrSelector.replace(/"/g, '"')}[^>]*content="([^"]*)"`,
+    "i"
+  );
+  const match1 = html.match(regex1);
+  if (match1?.[1]) return match1[1];
+
+  // Try: <meta content="..." property="...">
+  const regex2 = new RegExp(
+    `<meta[^>]*content="([^"]*)"[^>]*${attrSelector.replace(/"/g, '"')}`,
+    "i"
+  );
+  const match2 = html.match(regex2);
+  return match2?.[1] ?? null;
 }

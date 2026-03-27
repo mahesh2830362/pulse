@@ -1,4 +1,3 @@
-import { JSDOM } from "jsdom";
 import SHA256 from "crypto-js/sha256";
 
 export interface RSSItem {
@@ -20,10 +19,52 @@ export interface RSSFeedResult {
 
 /**
  * Discover RSS feed URL from a website URL.
- * Checks common paths and HTML <link> tags.
+ * Uses regex parsing (no jsdom) for Vercel compatibility.
  */
 export async function discoverFeedUrl(siteUrl: string): Promise<string | null> {
-  // Common RSS paths to try
+  const url = new URL(siteUrl);
+
+  // First: check HTML for <link> RSS/Atom tags using regex
+  try {
+    const response = await fetch(siteUrl, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (compatible; PulseBot/1.0)",
+        Accept: "text/html",
+      },
+      signal: AbortSignal.timeout(8000),
+    });
+
+    if (response.ok) {
+      const html = await response.text();
+
+      // Match <link> tags with RSS/Atom type
+      const linkRegex = /<link[^>]*type="application\/(rss|atom)\+xml"[^>]*>/gi;
+      const matches = html.matchAll(linkRegex);
+
+      for (const match of matches) {
+        const hrefMatch = match[0].match(/href="([^"]+)"/i);
+        if (hrefMatch?.[1]) {
+          const href = hrefMatch[1];
+          return href.startsWith("http") ? href : new URL(href, siteUrl).toString();
+        }
+      }
+
+      // Also try reversed attribute order: href before type
+      const linkRegex2 = /<link[^>]*href="([^"]+)"[^>]*type="application\/(rss|atom)\+xml"[^>]*/gi;
+      const matches2 = html.matchAll(linkRegex2);
+
+      for (const match of matches2) {
+        if (match[1]) {
+          const href = match[1];
+          return href.startsWith("http") ? href : new URL(href, siteUrl).toString();
+        }
+      }
+    }
+  } catch {
+    // Ignore and try common paths
+  }
+
+  // Second: try common RSS paths
   const commonPaths = [
     "/feed",
     "/rss",
@@ -36,42 +77,6 @@ export async function discoverFeedUrl(siteUrl: string): Promise<string | null> {
     "/blog/rss",
   ];
 
-  const url = new URL(siteUrl);
-
-  // First: check HTML for <link rel="alternate" type="application/rss+xml">
-  try {
-    const response = await fetch(siteUrl, {
-      headers: {
-        "User-Agent": "Mozilla/5.0 (compatible; PulseBot/1.0)",
-        Accept: "text/html",
-      },
-      signal: AbortSignal.timeout(8000),
-    });
-
-    if (response.ok) {
-      const html = await response.text();
-      const dom = new JSDOM(html);
-      const doc = dom.window.document;
-
-      // Look for RSS/Atom link tags
-      const feedLink =
-        doc.querySelector('link[type="application/rss+xml"]') ??
-        doc.querySelector('link[type="application/atom+xml"]') ??
-        doc.querySelector('link[type="application/feed+json"]');
-
-      if (feedLink) {
-        const href = feedLink.getAttribute("href");
-        if (href) {
-          // Handle relative URLs
-          return href.startsWith("http") ? href : new URL(href, siteUrl).toString();
-        }
-      }
-    }
-  } catch {
-    // Ignore and try common paths
-  }
-
-  // Second: try common paths
   for (const path of commonPaths) {
     try {
       const feedUrl = `${url.origin}${path}`;
@@ -103,8 +108,7 @@ export async function discoverFeedUrl(siteUrl: string): Promise<string | null> {
 }
 
 /**
- * Fetch and parse an RSS/Atom feed.
- * Supports conditional GET via ETag and If-Modified-Since.
+ * Fetch and parse an RSS/Atom feed using regex (no jsdom).
  */
 export async function fetchFeed(
   feedUrl: string,
@@ -128,7 +132,6 @@ export async function fetchFeed(
     signal: AbortSignal.timeout(15000),
   });
 
-  // 304 Not Modified — no new content
   if (response.status === 304) {
     return null;
   }
@@ -138,108 +141,111 @@ export async function fetchFeed(
   }
 
   const xml = await response.text();
-  const dom = new JSDOM(xml, { contentType: "text/xml" });
-  const doc = dom.window.document;
-
   const responseEtag = response.headers.get("etag");
   const responseLastModified = response.headers.get("last-modified");
 
-  // Try RSS 2.0 first
-  const rssItems = doc.querySelectorAll("item");
-  if (rssItems.length > 0) {
-    return parseRSS(doc, rssItems, responseEtag, responseLastModified);
+  // Detect if RSS or Atom
+  if (xml.includes("<entry>") || xml.includes("<entry ")) {
+    return parseAtomRegex(xml, responseEtag, responseLastModified);
   }
 
-  // Try Atom
-  const atomEntries = doc.querySelectorAll("entry");
-  if (atomEntries.length > 0) {
-    return parseAtom(doc, atomEntries, responseEtag, responseLastModified);
-  }
-
-  return { items: [], feedTitle: null, etag: responseEtag, lastModified: responseLastModified };
+  return parseRSSRegex(xml, responseEtag, responseLastModified);
 }
 
-function parseRSS(
-  doc: Document,
-  rssItems: NodeListOf<Element>,
+function getTagContent(xml: string, tagName: string): string | null {
+  // Handle CDATA and regular content
+  const regex = new RegExp(`<${tagName}[^>]*>(?:<!\\[CDATA\\[([\\s\\S]*?)\\]\\]>|([\\s\\S]*?))<\\/${tagName}>`, "i");
+  const match = xml.match(regex);
+  if (!match) return null;
+  return (match[1] ?? match[2] ?? "").trim();
+}
+
+function getAttrValue(xml: string, attr: string): string | null {
+  const regex = new RegExp(`${attr}="([^"]*)"`, "i");
+  const match = xml.match(regex);
+  return match?.[1] ?? null;
+}
+
+function parseRSSRegex(
+  xml: string,
   etag: string | null,
   lastModified: string | null
 ): RSSFeedResult {
-  const feedTitle = doc.querySelector("channel > title")?.textContent ?? null;
+  const feedTitle = getTagContent(xml.split("<item")[0], "title");
   const items: RSSItem[] = [];
 
-  rssItems.forEach((item) => {
-    const title = item.querySelector("title")?.textContent?.trim() ?? "Untitled";
-    const link = item.querySelector("link")?.textContent?.trim() ?? "";
-    const description = item.querySelector("description")?.textContent?.trim() ?? null;
-    const author =
-      item.querySelector("author")?.textContent?.trim() ??
-      item.querySelector("dc\\:creator")?.textContent?.trim() ??
-      null;
-    const pubDate = item.querySelector("pubDate")?.textContent?.trim() ?? null;
+  // Split by <item> tags
+  const itemBlocks = xml.split(/<item[\s>]/i).slice(1);
+
+  for (const block of itemBlocks) {
+    const itemXml = block.split("</item>")[0];
+
+    const title = getTagContent(itemXml, "title") ?? "Untitled";
+    const link = getTagContent(itemXml, "link") ?? "";
+    const description = getTagContent(itemXml, "description");
+    const author = getTagContent(itemXml, "dc:creator") ?? getTagContent(itemXml, "author");
+    const pubDate = getTagContent(itemXml, "pubDate");
 
     // Extract image from enclosure or media:content
-    const enclosure = item.querySelector("enclosure");
-    const mediaContent = item.querySelector("media\\:content, media\\:thumbnail");
-    let imageUrl: string | null = null;
+    const enclosureMatch = itemXml.match(/<enclosure[^>]*type="image\/[^"]*"[^>]*url="([^"]*)"[^>]*\/?>/i)
+      ?? itemXml.match(/<enclosure[^>]*url="([^"]*)"[^>]*type="image\/[^"]*"[^>]*\/?>/i);
+    const mediaMatch = itemXml.match(/<media:content[^>]*url="([^"]*)"[^>]*\/?>/i)
+      ?? itemXml.match(/<media:thumbnail[^>]*url="([^"]*)"[^>]*\/?>/i);
 
-    if (enclosure?.getAttribute("type")?.startsWith("image/")) {
-      imageUrl = enclosure.getAttribute("url");
-    } else if (mediaContent) {
-      imageUrl = mediaContent.getAttribute("url");
-    }
+    const imageUrl = enclosureMatch?.[1] ?? mediaMatch?.[1] ?? null;
 
-    // Clean HTML from description
+    // Strip HTML from description
     const plainDescription = description
-      ? description.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim().slice(0, 500)
+      ? description.replace(/<[^>]*>/g, " ").replace(/&[a-z]+;/gi, " ").replace(/\s+/g, " ").trim().slice(0, 500)
       : null;
 
     if (link) {
       items.push({
-        title,
-        url: link,
+        title: title.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"'),
+        url: link.trim(),
         contentSnippet: plainDescription,
         author,
         publishedAt: pubDate ? new Date(pubDate).toISOString() : null,
         imageUrl,
-        contentHash: SHA256(link + title).toString(),
+        contentHash: SHA256(link.trim() + title).toString(),
       });
     }
-  });
+  }
 
   return { items, feedTitle, etag, lastModified };
 }
 
-function parseAtom(
-  doc: Document,
-  entries: NodeListOf<Element>,
+function parseAtomRegex(
+  xml: string,
   etag: string | null,
   lastModified: string | null
 ): RSSFeedResult {
-  const feedTitle = doc.querySelector("feed > title")?.textContent ?? null;
+  const feedTitle = getTagContent(xml.split("<entry")[0], "title");
   const items: RSSItem[] = [];
 
-  entries.forEach((entry) => {
-    const title = entry.querySelector("title")?.textContent?.trim() ?? "Untitled";
-    const linkEl = entry.querySelector('link[rel="alternate"]') ?? entry.querySelector("link");
-    const link = linkEl?.getAttribute("href") ?? "";
-    const summary =
-      entry.querySelector("summary")?.textContent?.trim() ??
-      entry.querySelector("content")?.textContent?.trim() ??
-      null;
-    const author = entry.querySelector("author > name")?.textContent?.trim() ?? null;
-    const published =
-      entry.querySelector("published")?.textContent?.trim() ??
-      entry.querySelector("updated")?.textContent?.trim() ??
-      null;
+  const entryBlocks = xml.split(/<entry[\s>]/i).slice(1);
+
+  for (const block of entryBlocks) {
+    const entryXml = block.split("</entry>")[0];
+
+    const title = getTagContent(entryXml, "title") ?? "Untitled";
+
+    // Get link href - prefer alternate
+    const altLinkMatch = entryXml.match(/<link[^>]*rel="alternate"[^>]*href="([^"]*)"[^>]*\/?>/i);
+    const anyLinkMatch = entryXml.match(/<link[^>]*href="([^"]*)"[^>]*\/?>/i);
+    const link = altLinkMatch?.[1] ?? anyLinkMatch?.[1] ?? "";
+
+    const summary = getTagContent(entryXml, "summary") ?? getTagContent(entryXml, "content");
+    const author = getTagContent(entryXml, "name"); // inside <author><name>
+    const published = getTagContent(entryXml, "published") ?? getTagContent(entryXml, "updated");
 
     const plainSummary = summary
-      ? summary.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim().slice(0, 500)
+      ? summary.replace(/<[^>]*>/g, " ").replace(/&[a-z]+;/gi, " ").replace(/\s+/g, " ").trim().slice(0, 500)
       : null;
 
     if (link) {
       items.push({
-        title,
+        title: title.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"'),
         url: link,
         contentSnippet: plainSummary,
         author,
@@ -248,7 +254,7 @@ function parseAtom(
         contentHash: SHA256(link + title).toString(),
       });
     }
-  });
+  }
 
   return { items, feedTitle, etag, lastModified };
 }
@@ -258,7 +264,6 @@ function parseAtom(
  */
 export async function getYouTubeFeedUrl(channelUrl: string): Promise<string | null> {
   try {
-    // Fetch the channel page to find the channel ID
     const response = await fetch(channelUrl, {
       headers: {
         "User-Agent": "Mozilla/5.0 (compatible; PulseBot/1.0)",
@@ -270,7 +275,6 @@ export async function getYouTubeFeedUrl(channelUrl: string): Promise<string | nu
 
     const html = await response.text();
 
-    // Look for channel ID in meta tags or page content
     const channelIdMatch =
       html.match(/channel_id=([a-zA-Z0-9_-]+)/) ??
       html.match(/"channelId":"([a-zA-Z0-9_-]+)"/) ??
