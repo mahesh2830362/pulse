@@ -3,6 +3,9 @@ import { extractContent } from "@/lib/extractor/extract";
 import { detectUrlType } from "@/lib/extractor/detect";
 import { NextResponse } from "next/server";
 
+export const runtime = "nodejs";
+export const maxDuration = 30;
+
 /**
  * POST /api/items — Save a URL.
  *

@@ -3,6 +3,10 @@ import { detectUrlType } from "@/lib/extractor/detect";
 import { discoverFeedUrl, getYouTubeFeedUrl } from "@/lib/monitor/rss";
 import { NextResponse } from "next/server";
 
+// Force Node.js runtime (jsdom requires it)
+export const runtime = "nodejs";
+export const maxDuration = 30;
+
 /**
  * POST /api/sources — Add a new source to monitor.
  * Auto-detects type and discovers RSS feeds.

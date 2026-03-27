@@ -2,6 +2,9 @@ import { createClient } from "@/lib/supabase/server";
 import { summarize } from "@/lib/ai/provider";
 import { NextResponse } from "next/server";
 
+export const runtime = "nodejs";
+export const maxDuration = 30;
+
 /**
  * POST /api/summarize — Summarize an item's content.
  * Uses the user's configured AI provider and API key.

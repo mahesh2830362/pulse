@@ -5,6 +5,9 @@ import { sendPushNotification } from "@/lib/notifications/push";
 import type { PushSubscriptionData } from "@/lib/notifications/push";
 import { NextResponse } from "next/server";
 
+export const runtime = "nodejs";
+export const maxDuration = 60;
+
 /**
  * GET /api/sources/poll — Vercel Cron handler (every 5 minutes).
  * Also supports POST for manual triggering.
