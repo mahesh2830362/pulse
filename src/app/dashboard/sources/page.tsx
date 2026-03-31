@@ -97,6 +97,16 @@ export default function SourcesPage() {
         body: JSON.stringify({ url: trimmedUrl }),
       });
 
+      // Guard against non-JSON responses (e.g. HTML error pages)
+      const contentType = response.headers.get("content-type") ?? "";
+      if (!contentType.includes("application/json")) {
+        throw new Error(
+          response.ok
+            ? "Server returned an unexpected response"
+            : `Server error (${response.status})`
+        );
+      }
+
       const data = await response.json();
 
       if (response.status === 409) {
