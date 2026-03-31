@@ -1,5 +1,6 @@
 import type { AIProvider, AIProviderConfig } from "@/types";
 import { createClient } from "@/lib/supabase/server";
+import { decrypt } from "@/lib/crypto";
 
 const DEFAULT_MODELS: Record<AIProvider, string> = {
   claude: "claude-haiku-4-20250514",
@@ -40,9 +41,16 @@ export async function getAIConfigForUser(userId: string): Promise<AIProviderConf
 
     if (settings?.ai_api_key) {
       const provider = (settings.ai_provider || "claude") as AIProvider;
+      let apiKey: string;
+      try {
+        apiKey = decrypt(settings.ai_api_key);
+      } catch {
+        // Fallback for keys stored before encryption was added
+        apiKey = settings.ai_api_key;
+      }
       return {
         provider,
-        apiKey: settings.ai_api_key,
+        apiKey,
         model: settings.ai_model || DEFAULT_MODELS[provider],
       };
     }

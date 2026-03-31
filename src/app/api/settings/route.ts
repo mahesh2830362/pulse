@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/server";
+import { encrypt, decrypt } from "@/lib/crypto";
 import { NextResponse } from "next/server";
 
 /**
@@ -33,10 +34,17 @@ export async function GET() {
       });
     }
 
-    // Mask the API key — show first 8 and last 4 chars
-    const masked = settings.ai_api_key
-      ? maskApiKey(settings.ai_api_key)
-      : null;
+    // Decrypt and mask the API key — show first 8 and last 4 chars
+    let masked: string | null = null;
+    if (settings.ai_api_key) {
+      try {
+        const decrypted = decrypt(settings.ai_api_key);
+        masked = maskApiKey(decrypted);
+      } catch {
+        // Key may be stored in plaintext from before encryption was added
+        masked = maskApiKey(settings.ai_api_key);
+      }
+    }
 
     return NextResponse.json({
       settings: {
@@ -98,7 +106,9 @@ export async function PUT(request: Request) {
     };
 
     if (ai_provider !== undefined) updates.ai_provider = ai_provider;
-    if (ai_api_key !== undefined) updates.ai_api_key = ai_api_key || null;
+    if (ai_api_key !== undefined) {
+      updates.ai_api_key = ai_api_key ? encrypt(ai_api_key) : null;
+    }
     if (ai_model !== undefined) updates.ai_model = ai_model || null;
 
     // Upsert settings

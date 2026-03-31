@@ -47,7 +47,9 @@ export async function GET(request: Request) {
     }
 
     // Search across title, content_snippet, and author using ilike
-    const searchPattern = `%${query}%`;
+    // Escape characters that have special meaning in PostgREST filter syntax
+    const sanitized = query.replace(/[%_\\,().]/g, (ch) => `\\${ch}`);
+    const searchPattern = `%${sanitized}%`;
 
     const { data, error } = await supabase
       .from("items")

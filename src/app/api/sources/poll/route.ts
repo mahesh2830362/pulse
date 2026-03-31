@@ -95,14 +95,19 @@ async function pollSources(request: Request) {
           let newItemCount = 0;
 
           for (const feedItem of feedResult.items) {
-            // Check for duplicate
+            // Check for duplicate item (globally shared)
             const { data: existing } = await supabase
               .from("items")
               .select("id")
               .eq("content_hash", feedItem.contentHash)
               .single();
 
-            if (!existing) {
+            let itemId: string | null = null;
+            let isNewItem = false;
+
+            if (existing) {
+              itemId = existing.id;
+            } else {
               // Insert new item
               const { data: newItem } = await supabase
                 .from("items")
@@ -121,45 +126,58 @@ async function pollSources(request: Request) {
                 .single();
 
               if (newItem) {
-                // Add to all users who follow this source
-                await supabase.from("user_feed_items").insert({
+                itemId = newItem.id;
+                isNewItem = true;
+              }
+            }
+
+            if (itemId) {
+              // Always upsert into user_feed_items — ensures every user
+              // who follows this source gets the item, even if it already
+              // existed from another user's source.
+              await supabase.from("user_feed_items").upsert(
+                {
                   user_id: source.user_id,
-                  item_id: newItem.id,
+                  item_id: itemId,
+                  is_read: false,
+                },
+                { onConflict: "user_id,item_id" }
+              );
+
+              if (isNewItem) {
+                newItemCount++;
+              }
+
+              // Create in-app notification for high-priority sources (new items only)
+              if (isNewItem && source.is_high_priority) {
+                await supabase.from("notifications").insert({
+                  user_id: source.user_id,
+                  title: `New from ${source.name}`,
+                  body: feedItem.title,
+                  url: feedItem.url,
                   is_read: false,
                 });
-                newItemCount++;
 
-                // Create in-app notification for high-priority sources
-                if (source.is_high_priority) {
-                  await supabase.from("notifications").insert({
-                    user_id: source.user_id,
-                    title: `New from ${source.name}`,
-                    body: feedItem.title,
-                    url: feedItem.url,
-                    is_read: false,
-                  });
+                // Send push notification
+                const { data: subs } = await supabase
+                  .from("push_subscriptions")
+                  .select("endpoint, p256dh, auth")
+                  .eq("user_id", source.user_id);
 
-                  // Send push notification
-                  const { data: subs } = await supabase
-                    .from("push_subscriptions")
-                    .select("endpoint, p256dh, auth")
-                    .eq("user_id", source.user_id);
-
-                  if (subs) {
-                    for (const sub of subs) {
-                      await sendPushNotification(
-                        {
-                          endpoint: sub.endpoint,
-                          keys: { p256dh: sub.p256dh, auth: sub.auth },
-                        } as PushSubscriptionData,
-                        {
-                          title: `New from ${source.name}`,
-                          body: feedItem.title,
-                          url: feedItem.url,
-                          tag: `pulse-${source.id}`,
-                        }
-                      );
-                    }
+                if (subs) {
+                  for (const sub of subs) {
+                    await sendPushNotification(
+                      {
+                        endpoint: sub.endpoint,
+                        keys: { p256dh: sub.p256dh, auth: sub.auth },
+                      } as PushSubscriptionData,
+                      {
+                        title: `New from ${source.name}`,
+                        body: feedItem.title,
+                        url: feedItem.url,
+                        tag: `pulse-${source.id}`,
+                      }
+                    );
                   }
                 }
               }
@@ -199,7 +217,11 @@ async function pollSources(request: Request) {
                 .eq("content_hash", contentHash)
                 .single();
 
-              if (!existing) {
+              let itemId: string | null = null;
+
+              if (existing) {
+                itemId = existing.id;
+              } else {
                 const { data: newItem } = await supabase
                   .from("items")
                   .insert({
@@ -217,12 +239,19 @@ async function pollSources(request: Request) {
                   .single();
 
                 if (newItem) {
-                  await supabase.from("user_feed_items").insert({
-                    user_id: source.user_id,
-                    item_id: newItem.id,
-                    is_read: false,
-                  });
+                  itemId = newItem.id;
                 }
+              }
+
+              if (itemId) {
+                await supabase.from("user_feed_items").upsert(
+                  {
+                    user_id: source.user_id,
+                    item_id: itemId,
+                    is_read: false,
+                  },
+                  { onConflict: "user_id,item_id" }
+                );
               }
             }
 

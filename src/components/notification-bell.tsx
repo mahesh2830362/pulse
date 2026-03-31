@@ -57,10 +57,13 @@ export function NotificationBell() {
 
   // Poll for notifications every 60 seconds
   useEffect(() => {
-    fetchNotifications();
     const interval = setInterval(fetchNotifications, 60000);
     return () => clearInterval(interval);
   }, [fetchNotifications]);
+
+  // Fetch once on mount — setState inside fetchNotifications is intentional
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  useEffect(() => { fetchNotifications(); }, [fetchNotifications]);
 
   // Close dropdown on outside click
   useEffect(() => {

@@ -56,12 +56,14 @@ export function ThemeProvider({ children }: ThemeProviderProps) {
   const [theme, setThemeState] = useState<Theme>("system");
   const [resolvedTheme, setResolvedTheme] = useState<"light" | "dark">("light");
 
-  // Initialize from localStorage on mount
+  // Initialize from localStorage on mount — must use effect because
+  // localStorage is unavailable during SSR; setState here is intentional.
   useEffect(() => {
     const stored = localStorage.getItem(STORAGE_KEY) as Theme | null;
     const initial = stored === "light" || stored === "dark" ? stored : "system";
     const resolved = resolveTheme(initial);
 
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setThemeState(initial);
     setResolvedTheme(resolved);
     applyTheme(resolved, initial);

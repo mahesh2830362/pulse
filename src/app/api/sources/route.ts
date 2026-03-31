@@ -56,8 +56,14 @@ export async function POST(request: Request) {
       feedUrl = await getYouTubeFeedUrl(detection.canonicalUrl);
       sourceName = sourceName || (detection.metadata.channelPath.split("/").pop() ?? "YouTube Channel");
       sourceType = "youtube";
+    } else if (detection.type === "reddit" && detection.metadata.isSubreddit === "true") {
+      // Subreddit — Reddit exposes public RSS at /r/{name}/.rss
+      const subreddit = detection.metadata.subreddit;
+      feedUrl = `https://www.reddit.com/r/${subreddit}/.rss`;
+      sourceName = sourceName || `r/${subreddit}`;
+      sourceType = "reddit";
     } else if (detection.type === "x_profile") {
-      // X profile — no auto-monitoring (option C)
+      // X profile — no auto-monitoring (paste links manually)
       sourceName = sourceName || `@${detection.metadata.username}`;
     } else if (detection.type === "rss") {
       // Direct RSS URL
@@ -93,8 +99,8 @@ export async function POST(request: Request) {
 
     // Determine default check interval
     const defaultInterval =
-      sourceType === "rss" || sourceType === "youtube"
-        ? 10 // RSS: every 10 min
+      sourceType === "rss" || sourceType === "youtube" || sourceType === "reddit"
+        ? 10 // RSS-backed: every 10 min
         : sourceType === "website"
           ? 10 // Page monitoring: every 10 min
           : 0; // X profiles: no auto-check (paste links manually)

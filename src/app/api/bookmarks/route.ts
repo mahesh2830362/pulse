@@ -199,6 +199,21 @@ export async function PATCH(request: Request) {
       );
     }
 
+    // Verify the bookmark belongs to this user before any mutation
+    const { data: bookmark } = await supabase
+      .from("bookmarks")
+      .select("id")
+      .eq("id", id)
+      .eq("user_id", user.id)
+      .single();
+
+    if (!bookmark) {
+      return NextResponse.json(
+        { error: "Bookmark not found" },
+        { status: 404 }
+      );
+    }
+
     // Update notes if provided
     if (notes !== undefined) {
       const { error } = await supabase
@@ -212,16 +227,25 @@ export async function PATCH(request: Request) {
 
     // Replace tags if provided
     if (tagIds !== undefined && Array.isArray(tagIds)) {
-      // Remove existing tags
+      // Remove existing tags for this bookmark
       await supabase.from("bookmark_tags").delete().eq("bookmark_id", id);
 
-      // Add new tags
+      // Add new tags — only tags owned by this user
       if (tagIds.length > 0) {
-        const bookmarkTags = tagIds.map((tagId: string) => ({
-          bookmark_id: id,
-          tag_id: tagId,
-        }));
-        await supabase.from("bookmark_tags").insert(bookmarkTags);
+        const { data: ownedTags } = await supabase
+          .from("tags")
+          .select("id")
+          .eq("user_id", user.id)
+          .in("id", tagIds);
+
+        const validTagIds = (ownedTags ?? []).map((t) => t.id);
+        if (validTagIds.length > 0) {
+          const bookmarkTags = validTagIds.map((tagId) => ({
+            bookmark_id: id,
+            tag_id: tagId,
+          }));
+          await supabase.from("bookmark_tags").insert(bookmarkTags);
+        }
       }
     }
 

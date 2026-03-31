@@ -49,52 +49,11 @@ self.addEventListener("notificationclick", (event) => {
   );
 });
 
-// ── Offline article caching ──
-
-// Cache API responses for items and bookmarks so they are available offline
-self.addEventListener("fetch", (event) => {
-  const url = new URL(event.request.url);
-
-  // Only cache GET requests to our API endpoints for feed and bookmark data
-  if (
-    event.request.method !== "GET" ||
-    !url.pathname.startsWith("/api/")
-  ) {
-    return;
-  }
-
-  const isCacheable =
-    url.pathname.startsWith("/api/items") ||
-    url.pathname.startsWith("/api/bookmarks");
-
-  if (!isCacheable) return;
-
-  event.respondWith(
-    caches.open(ARTICLE_CACHE).then((cache) =>
-      fetch(event.request)
-        .then((response) => {
-          // Cache successful responses
-          if (response.ok) {
-            cache.put(event.request, response.clone());
-          }
-          return response;
-        })
-        .catch(() =>
-          // Network failed — serve from cache if available
-          cache.match(event.request).then((cached) => {
-            if (cached) return cached;
-            return new Response(
-              JSON.stringify({ error: "Offline — no cached data available" }),
-              {
-                status: 503,
-                headers: { "Content-Type": "application/json" },
-              }
-            );
-          })
-        )
-    )
-  );
-});
+// ── Offline caching ──
+// NOTE: Authenticated API endpoints (/api/items, /api/bookmarks) are NOT cached
+// in the service worker because responses are user-specific. Caching them by URL
+// alone risks serving one user's data to another on shared browsers.
+// Only cache static assets and explicitly client-pushed article data.
 
 // Listen for messages from the client to cache specific articles
 self.addEventListener("message", (event) => {

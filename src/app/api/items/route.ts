@@ -89,18 +89,6 @@ async function addAsSource(
     });
   }
 
-  // Forward to sources API internally
-  const sourcesUrl = new URL("/api/sources", "http://localhost:3000");
-  const response = await fetch(sourcesUrl, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      cookie: "", // Will use server-side supabase client instead
-    },
-    body: JSON.stringify({ url: canonicalUrl }),
-  });
-
-  // Since internal fetch won't have auth, do it directly
   let feedUrl: string | null = null;
   let sourceType = detection.type;
   let sourceName = "";
@@ -110,8 +98,11 @@ async function addAsSource(
     sourceType = "youtube";
   } else if (detection.type === "x_profile") {
     sourceName = `@${detection.metadata.username}`;
-  } else if (detection.type === "reddit") {
-    sourceName = `r/${detection.metadata.subreddit}`;
+  } else if (detection.type === "reddit" && detection.metadata.isSubreddit === "true") {
+    const subreddit = detection.metadata.subreddit;
+    feedUrl = `https://www.reddit.com/r/${subreddit}/.rss`;
+    sourceName = `r/${subreddit}`;
+    sourceType = "reddit";
   } else if (detection.type === "rss") {
     feedUrl = canonicalUrl;
     sourceName = new URL(canonicalUrl).hostname;
@@ -152,7 +143,7 @@ async function addAsSource(
   }
 
   const defaultInterval =
-    sourceType === "rss" || sourceType === "youtube"
+    sourceType === "rss" || sourceType === "youtube" || sourceType === "reddit"
       ? 10
       : sourceType === "website"
         ? 10
